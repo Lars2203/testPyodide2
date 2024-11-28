@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pyodide Example - Display and Process Existing Image</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.0/full/pyodide.js"></script>
+</head>
+<body>
+    <h1>Pyodide - Display and Process Existing Image</h1>
+    <p>This example processes an image already present in the HTML and re-displays it in base64 format.</p>
+    <div id="image-container">
+        <!-- Pre-existing image -->
+        <img id="raw-image" alt="Image will be displayed here" src="gray.png" />
+    </div>
+
+    <script>
+        async function main() {
+            // Load Pyodide
+            const pyodide = await loadPyodide();
+            await pyodide.loadPackage("imageio");
+
+            // Python script
+            const pythonCode = `
+from js import document
+import imageio.v3 as iio
+import io, base64
+
+# Get the existing image element
+image_element = document.getElementById("raw-image")
+image_url = image_element.getAttribute("src")
+
+# Fetch the image data
+with open(image_url, "rb") as f:
+    image_bytes = f.read()
+
+# Convert to base64
+img_data = base64.b64encode(image_bytes).decode('utf-8')
+img_src = f"data:image/png;base64,{img_data}"
+
+# Update the image element's src attribute
+image_element.setAttribute("src", img_src)
+            `;
+
+            // Run the Python code
+            await pyodide.runPythonAsync(pythonCode);
+        }
+
+        // Execute the script
+        main();
+    </script>
+</body>
+</html>
