@@ -1,51 +1,161 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>Pyodide Example - Display and Process Existing Image</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.24.0/full/pyodide.js"></script>
+
+    <style>
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .controls {
+            margin: 20px 0;
+        }
+
+        .slider-container {
+            margin: 10px 0;
+        }
+
+        canvas {
+            max-width: 100%;
+            margin: 10px 0;
+        }
+    </style>
 </head>
+
 <body>
     <h1>Pyodide - Display and Process Existing Image</h1>
     <p>This example processes an image already present in the HTML and re-displays it in base64 format.</p>
+    <div class="container">
+
+        <div class="controls">
+            <div class="slider-container">
+                <label for="threshold">Threshold Value (0-1): </label>
+                <input type="range" id="threshold" min="0" max="100" value="50">
+                <span id="thresholdValue">0.5</span>
+            </div>
+
+            <div class="slider-container">
+                <label for="kernelSize">Kernel Size (2-11): </label>
+                <input type="range" id="kernelSize" min="2" max="11" step="1" value="3">
+                <span id="kernelSizeValue">3</span>
+            </div>
+
+            <div>
+                <button onclick="applyThreshold()">Apply Threshold</button>
+                <button onclick="applyMorphological('dilation')">Apply Dilation</button>
+                <button onclick="applyMorphological('erosion')">Apply Erosion</button>
+                <button onclick="resetImage()">Reset Image</button>
+            </div>
+        </div>
+
+    </div>
     <div id="image-container">
         <!-- Pre-existing image -->
-        <img id="raw-image" alt="Image will be displayed here" src="gray.png" />
+        <img id="raw-image" alt="Image will be displayed here" src="gray.png"/>
     </div>
 
     <script>
         async function main() {
             // Load Pyodide
             const pyodide = await loadPyodide();
-            await pyodide.loadPackage("imageio");
+            await pyodide.loadPackage("scikit-image");
 
-            // Python script
-            const pythonCode = `
+            // Initialize Python environment
+            const initializePythonCode = `
 from js import document
+import base64
+import io
+from skimage import morphology
+from skimage.color import rgb2gray
+from skimage.color import rgba2rgb
+from skimage.io import imread
+import numpy as np
 import imageio.v3 as iio
-import io, base64
+from pyodide.http import pyfetch
 
-# Get the existing image element
-image_element = document.getElementById("raw-image")
-image_url = image_element.getAttribute("src")
+def process_image(image_data, operation, param=None):
+    img_bytes = base64.b64decode(image_data.split(",")[1])
+    img = iio.imread(io.BytesIO(img_bytes))
+    
+    # Convert RGBA to RGB if needed
+    if img.shape[-1] == 4:  # If the image has 4 channels (RGBA)
+        img = rgba2rgb(img)
+    
+    gray_img = rgb2gray(img)
 
-# Fetch the image data
-with open(image_url, "rb") as f:
-    image_bytes = f.read()
+    if operation == "threshold":
+        result = (gray_img > param).astype(np.uint8) * 255
+    elif operation == "dilation":
+        result = morphology.dilation(gray_img, morphology.square(param)) * 255
+    elif operation == "erosion":
+        result = morphology.erosion(gray_img, morphology.square(param)) * 255
+    else:
+        raise ValueError("Invalid operation")
 
-# Convert to base64
-img_data = base64.b64encode(image_bytes).decode('utf-8')
-img_src = f"data:image/png;base64,{img_data}"
-
-# Update the image element's src attribute
-image_element.setAttribute("src", img_src)
+    result_bytes = io.BytesIO()
+    iio.imwrite(result_bytes, result.astype(np.uint8), format="png")
+    result_bytes.seek(0)
+    return f"data:image/png;base64,{base64.b64encode(result_bytes.read()).decode('utf-8')}"
             `;
+            await pyodide.runPythonAsync(initializePythonCode);
 
-            // Run the Python code
-            await pyodide.runPythonAsync(pythonCode);
+            // Function to fetch the image
+            async function fetchImage() {
+                const fetchImageCode = `
+                    response = await pyfetch(url="https://lars2203.github.io/testPyodide/gray.png", method="GET")
+                    img_bytes = await response.bytes()
+                    image_element = document.getElementById("raw-image")
+                    image_element.setAttribute("src", f"data:image/png;base64,{base64.b64encode(img_bytes).decode('utf-8')}")
+                    `;
+                await pyodide.runPythonAsync(fetchImageCode);
+            }
+
+            // Function to process image with operation
+            async function processImage(operation, param) {
+                const imageElement = document.getElementById("raw-image");
+                const imgSrc = imageElement.getAttribute("src");
+                const processCode = `
+                    process_image("${imgSrc}", "${operation}", ${param})
+                `;
+                const newImageSrc = await pyodide.runPythonAsync(processCode);
+                imageElement.setAttribute("src", newImageSrc);
+            }
+
+            // Attach processing functions
+            window.applyThreshold = () => {
+                const thresholdValue = document.getElementById("threshold").value / 100;
+                processImage("threshold", thresholdValue);
+            };
+
+            window.applyMorphological = (operation) => {
+                const kernelSize = parseInt(document.getElementById("kernelSize").value, 10);
+                processImage(operation, kernelSize);
+            };
+
+            window.resetImage = fetchImage;
+
+            // Initial image fetch
+            await fetchImage();
         }
 
         // Execute the script
         main();
+
+        // Slider updates
+        document.getElementById('threshold').addEventListener('input', () => {
+            document.getElementById('thresholdValue').textContent = document.getElementById('threshold').value / 100;
+        });
+
+        document.getElementById('kernelSize').addEventListener('input', () => {
+            document.getElementById('kernelSizeValue').textContent = document.getElementById('kernelSize').value;
+        });
     </script>
+
 </body>
+
 </html>
